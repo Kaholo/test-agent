@@ -4,6 +4,11 @@ const path = require('path');
 const pluginsService = require('./services/plugins.service');
 const workersPath = path.join(__dirname, '../workers');
 
+const ERRORS = {
+    "MODULE_NOT_FOUND": 100,
+    "KILLED": null
+}
+
 class ExecutionManager{
 
     constructor(){
@@ -40,11 +45,15 @@ class ExecutionManager{
             const pluginConf = pluginsService.plugins[pluginName];
             let workerProcess;
     
-            if (pluginConf.execProgram == 'node'){
-                workerProcess = child_process.spawn(pluginConf.execProgram, [path.join(workersPath,'node.js'), pluginConf.main, JSON.stringify(executionData)]);
-            } else {
-                workerProcess = child_process.spawn(pluginConf.execProgram, [pluginConf.main, JSON.stringify(executionData)]);
-            }
+            const spawnOptions = {
+                windowsHide: true
+            };
+
+            workerProcess = child_process.spawn(
+                pluginConf.execProgram, 
+                [path.join(workersPath,'node.js'), pluginConf.main, JSON.stringify(executionData)],
+                spawnOptions
+            );
     
             this.addMapExecution(executionId, action._id, workerProcess);
             
@@ -65,13 +74,15 @@ class ExecutionManager{
             });
 
             workerProcess.on('close', (code) => {
-                result.status = code === 0 ? 'success' : 'error';
-                this.actionDone(executionId, action._id);
-                
-                // SIGKILL
-                if (code === null && !result.stderr){
-                    result.stderr = "SIGKILL"
+                switch (code) {
+                    case ERRORS.MODULE_NOT_FOUND:
+                        result.stderr = "ENOENT";
+                    case ERRORS.KILLED:
+                        result.stderr = result.stderr || "SIGKILL";
                 }
+                result.status = code === 0 ? 'success' : 'error';
+
+                this.actionDone(executionId, action._id);
                 return resolve(result);
             }); 
         });
